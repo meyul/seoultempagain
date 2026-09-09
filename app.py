@@ -29,7 +29,6 @@ except Exception as e:
     st.stop()
 
 # ----------------- 연도별 평균기온 만들기 -----------------
-# 연도별로 평균기온을 다시 평균(연평균기온) + 관측일 수 세기
 yearly = (
     raw.dropna(subset=["평균기온"])
     .groupby("연도")["평균기온"]
@@ -45,7 +44,7 @@ yearly = yearly[
 x = yearly["연도"].to_numpy(dtype=float)
 y = yearly["연평균기온"].to_numpy(dtype=float)
 
-# ----------------- 회귀 직선 & 상관계수 -----------------
+# ----------------- 회귀 직선 & 상관계수 (전체 기간) -----------------
 slope, intercept = np.polyfit(x, y, 1)   # 1차(직선) 회귀
 r = np.corrcoef(x, y)[0, 1]              # 상관계수
 
@@ -53,21 +52,59 @@ start_year = int(yearly["연도"].min())
 end_year = int(yearly["연도"].max())
 n_years = len(yearly)
 
-# ----------------- 직선 정보 표시 -----------------
+# 기울기를 "100년당 상승 온도"로 환산
+slope_100 = slope * 100
+
+# ----------------- 회귀 직선 & 상관계수 (최근 20년) -----------------
+recent = yearly[yearly["연도"] >= end_year - 19]   # 마지막 해 포함 20년
+rx = recent["연도"].to_numpy(dtype=float)
+ry = recent["연평균기온"].to_numpy(dtype=float)
+recent_start = int(recent["연도"].min())
+
+slope_r, intercept_r = np.polyfit(rx, ry, 1)
+r_r = np.corrcoef(rx, ry)[0, 1]
+slope_r_100 = slope_r * 100
+
+# ----------------- 자료 정보 -----------------
 st.subheader("📌 회귀 직선을 만든 자료")
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3 = st.columns(3)
 c1.metric("사용한 해의 개수", f"{n_years}개")
 c2.metric("시작 연도", f"{start_year}년")
 c3.metric("끝 연도", f"{end_year}년")
-c4.metric("상관계수 (r)", f"{r:.3f}")
-st.caption(f"회귀 직선식: 기온(℃) = {slope:.5f} × 연도 + {intercept:.2f}")
+
+# ----------------- 100년당 기온 상승 속도 비교 -----------------
+def big_number(label, value, color):
+    return f"""
+    <div style="text-align:center; padding:12px 8px;
+                border:2px solid {color}; border-radius:14px;">
+      <div style="font-size:1.1rem; color:#555;">{label}</div>
+      <div style="font-size:2.8rem; font-weight:700; color:{color};">{value}</div>
+lt;div style="font-size:1.0rem; color:#555;">℃ / 100년</div>
+    </div>
+    """
+
+st.subheader("🌡️ 100년에 몇 ℃ 오를까?")
+col_all, col_recent = st.columns(2)
+col_all.markdown(
+    big_number(f"전체 기간 ({start_year}–{end_year}년)",
+               f"{slope_100:+.2f}", "#e4572e"),
+    unsafe_allow_html=True,
+)
+col_recent.markdown(
+    big_number(f"최근 20년 ({recent_start}–{end_year}년)",
+               f"{slope_r_100:+.2f}", "#2a9d8f"),
+    unsafe_allow_html=True,
+)
+st.caption(
+    f"상관계수 — 전체 기간: r = {r:.3f} · 최근 20년: r = {r_r:.3f}"
+)
 
 # ----------------- 연도 슬라이더 & 예측 -----------------
 st.subheader("🔮 기온 예측해 보기")
 year = st.slider("예측하고 싶은 연도를 고르세요",
                  min_value=1900, max_value=2100, value=2025, step=1)
 
-pred = slope * year + intercept
+pred = slope * year + intercept   # 예측은 전체 기간 직선 사용
 
 st.markdown(
     f"""
@@ -94,11 +131,11 @@ fig.add_trace(go.Scatter(
     hovertemplate="%{x:.0f}년 · %{y:.2f}℃<extra></extra>",
 ))
 
-# 회귀 직선 (자료가 있는 구간: 실선)
+# 회귀 직선 — 전체 기간 (자료가 있는 구간: 실선)
 line_x = np.array([start_year, end_year], dtype=float)
 fig.add_trace(go.Scatter(
     x=line_x, y=slope * line_x + intercept,
-    mode="lines", name="회귀 직선",
+    mode="lines", name=f"추세선·전체 ({slope_100:+.2f}℃/100년)",
     line=dict(color="#e4572e", width=3),
 ))
 
@@ -108,6 +145,13 @@ fig.add_trace(go.Scatter(
     x=ext_x, y=slope * ext_x + intercept,
     mode="lines", name="예측 구간",
     line=dict(color="#e4572e", width=3, dash="dot"),
+))
+
+# 회귀 직선 — 최근 20년 (녹색 점선)
+fig.add_trace(go.Scatter(
+    x=rx, y=slope_r * rx + intercept_r,
+    mode="lines", name=f"추세선·최근 20년 ({slope_r_100:+.2f}℃/100년)",
+    line=dict(color="#2a9d8f", width=3, dash="dash"),
 ))
 
 # 선택한 연도의 예측값 표시
